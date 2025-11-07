@@ -1,0 +1,5 @@
+{
+    "name": "Medical Transcript Diarizer",
+    "description": "An AI-powered tool to upload a video of a doctor-patient consultation, generate a speaker-diarized transcript, and provide it as a structured JSON file for easy storage and retrieval.",
+    "requestFramePermissions": []
+}

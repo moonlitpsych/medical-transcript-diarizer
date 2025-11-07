@@ -1,0 +1,231 @@
+import { useState, useCallback } from 'react';
+import { FileUpload } from './components/FileUpload';
+import { TextTranscriptInput } from './components/TextTranscriptInput';
+import { TranscriptDisplay } from './components/TranscriptDisplay';
+import { Loader } from './components/Loader';
+import { generateTranscript, diarizeTextTranscript } from './services/geminiService';
+import { generateTranscriptWithMSE } from './services/geminiServiceMSE';
+import { MedicalIcon } from './components/icons';
+
+type AppState = 'idle' | 'loading' | 'success' | 'error';
+type InputMode = 'video' | 'text';
+
+export default function App() {
+    const [inputMode, setInputMode] = useState<InputMode>('video');
+    const [videoFile, setVideoFile] = useState<File | null>(null);
+    const [textTranscript, setTextTranscript] = useState<string>('');
+    const [patientId, setPatientId] = useState<string>('');
+    const [consultationDate, setConsultationDate] = useState<string>(new Date().toISOString().split('T')[0] ?? '');
+    const [includeMSE, setIncludeMSE] = useState<boolean>(false);
+
+    const [transcript, setTranscript] = useState<any>(null);
+    const [appState, setAppState] = useState<AppState>('idle');
+    const [loadingMessage, setLoadingMessage] = useState<string>('');
+    const [error, setError] = useState<string>('');
+
+    const handleFileChange = (file: File | null) => {
+        setVideoFile(file);
+    };
+
+    const handleTranscriptChange = (text: string) => {
+        setTextTranscript(text);
+    };
+
+    const handleModeChange = (mode: InputMode) => {
+        setInputMode(mode);
+        setVideoFile(null);
+        setTextTranscript('');
+        setError('');
+    };
+
+    const resetState = () => {
+        setVideoFile(null);
+        setTextTranscript('');
+        setPatientId('');
+        setConsultationDate(new Date().toISOString().split('T')[0] ?? '');
+        setTranscript(null);
+        setAppState('idle');
+        setError('');
+        setLoadingMessage('');
+    };
+
+    const handleSubmit = useCallback(async () => {
+        // Validation based on mode
+        if (inputMode === 'video') {
+            if (!videoFile || !patientId || !consultationDate) {
+                setError('Please fill in all fields and select a video file.');
+                return;
+            }
+        } else {
+            if (!textTranscript.trim() || !patientId || !consultationDate) {
+                setError('Please fill in all fields and paste a transcript.');
+                return;
+            }
+        }
+
+        setAppState('loading');
+        setError('');
+
+        try {
+            const onProgress = (message: string) => setLoadingMessage(message);
+
+            let result: any;
+            if (inputMode === 'video' && videoFile) {
+                if (includeMSE) {
+                    result = await generateTranscriptWithMSE(videoFile, patientId, consultationDate, onProgress);
+                } else {
+                    result = await generateTranscript(videoFile, patientId, consultationDate, onProgress);
+                }
+            } else {
+                result = await diarizeTextTranscript(textTranscript, patientId, consultationDate, onProgress);
+            }
+
+            setTranscript(result);
+            setAppState('success');
+        } catch (err) {
+            console.error(err);
+            const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred.';
+            setError(`Failed to generate transcript. ${errorMessage}`);
+            setAppState('error');
+        } finally {
+            setLoadingMessage('');
+        }
+    }, [inputMode, videoFile, textTranscript, patientId, consultationDate, includeMSE]);
+
+    const isFormValid = inputMode === 'video'
+        ? (videoFile && patientId.trim() && consultationDate)
+        : (textTranscript.trim() && patientId.trim() && consultationDate);
+
+    return (
+        <div className="min-h-screen bg-slate-100/50 font-sans text-slate-800 flex flex-col items-center justify-center p-4">
+            <div className="w-full max-w-3xl mx-auto">
+                <header className="text-center mb-8">
+                    <div className="flex items-center justify-center gap-3 text-3xl md:text-4xl font-bold text-slate-700">
+                        <MedicalIcon className="w-10 h-10 text-blue-500" />
+                        <h1>Medical Transcript Diarizer</h1>
+                    </div>
+                    <p className="mt-2 text-slate-500">
+                        AI-powered consultation analysis and transcription.
+                    </p>
+                </header>
+
+                <main className="bg-white rounded-xl shadow-lg p-6 md:p-8 border border-slate-200/80">
+                    {appState === 'idle' && (
+                        <div className="flex flex-col gap-6">
+                            <div>
+                                <h2 className="text-lg font-semibold text-slate-700 mb-1">1. Consultation Details</h2>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label htmlFor="patientId" className="block text-sm font-medium text-slate-600 mb-1">Patient ID</label>
+                                        <input
+                                            type="text"
+                                            id="patientId"
+                                            value={patientId}
+                                            onChange={(e) => setPatientId(e.target.value)}
+                                            placeholder="e.g., P-12345"
+                                            className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 transition"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="consultationDate" className="block text-sm font-medium text-slate-600 mb-1">Consultation Date</label>
+                                        <input
+                                            type="date"
+                                            id="consultationDate"
+                                            value={consultationDate}
+                                            onChange={(e) => setConsultationDate(e.target.value)}
+                                            className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 transition"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h2 className="text-lg font-semibold text-slate-700 mb-3">2. Input Source</h2>
+
+                                {/* Tab buttons */}
+                                <div className="flex gap-2 mb-4 border-b border-slate-200">
+                                    <button
+                                        onClick={() => handleModeChange('video')}
+                                        className={`px-4 py-2 font-medium text-sm transition-all border-b-2 ${
+                                            inputMode === 'video'
+                                                ? 'border-blue-600 text-blue-600'
+                                                : 'border-transparent text-slate-500 hover:text-slate-700'
+                                        }`}
+                                    >
+                                        Video Upload
+                                    </button>
+                                    <button
+                                        onClick={() => handleModeChange('text')}
+                                        className={`px-4 py-2 font-medium text-sm transition-all border-b-2 ${
+                                            inputMode === 'text'
+                                                ? 'border-blue-600 text-blue-600'
+                                                : 'border-transparent text-slate-500 hover:text-slate-700'
+                                        }`}
+                                    >
+                                        Text Transcript
+                                    </button>
+                                </div>
+
+                                {/* Tab content */}
+                                {inputMode === 'video' ? (
+                                    <>
+                                        <FileUpload onFileChange={handleFileChange} />
+                                        <div className="mt-4 flex items-start gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                            <input
+                                                type="checkbox"
+                                                id="includeMSE"
+                                                checked={includeMSE}
+                                                onChange={(e) => setIncludeMSE(e.target.checked)}
+                                                className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                            />
+                                            <label htmlFor="includeMSE" className="flex-1 text-sm">
+                                                <span className="font-semibold text-blue-900">🔬 Include Mental Status Exam (MSE) Analysis</span>
+                                                <p className="text-blue-700 mt-1">
+                                                    AI will analyze video for appearance, behavior, affect, and speech observations. Takes slightly longer to process.
+                                                </p>
+                                            </label>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <TextTranscriptInput onTranscriptChange={handleTranscriptChange} />
+                                )}
+                            </div>
+
+                            <div className="mt-2">
+                                <button
+                                    onClick={handleSubmit}
+                                    disabled={!isFormValid}
+                                    className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg shadow-md hover:bg-blue-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-all duration-300 transform hover:scale-105 disabled:scale-100"
+                                >
+                                    {inputMode === 'video' ? (includeMSE ? 'Generate Transcript + MSE' : 'Generate Transcript') : 'Diarize Transcript'}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {appState === 'loading' && <Loader message={loadingMessage} />}
+
+                    {(appState === 'success' && transcript) && (
+                        <TranscriptDisplay transcriptData={transcript} onReset={resetState} />
+                    )}
+
+                    {(appState === 'error' || (appState === 'idle' && error)) && (
+                        <div className="text-center">
+                            <p className="text-red-600 bg-red-100 p-4 rounded-lg">{error}</p>
+                            <button
+                                onClick={resetState}
+                                className="mt-6 bg-slate-500 text-white font-bold py-2 px-6 rounded-lg hover:bg-slate-600 transition-colors"
+                            >
+                                Try Again
+                            </button>
+                        </div>
+                    )}
+                </main>
+
+                <footer className="text-center mt-8 text-sm text-slate-400">
+                    <p>&copy; {new Date().getFullYear()} MedTranscribe AI. All rights reserved.</p>
+                </footer>
+            </div>
+        </div>
+    );
+}

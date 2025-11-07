@@ -1,0 +1,185 @@
+import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+import { fileToBase64 } from '../utils/fileUtils';
+import { type TranscriptData } from '../types';
+
+// Client-side API key (for demo mode only - not for PHI)
+const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+
+if (!apiKey) {
+    throw new Error("NEXT_PUBLIC_GEMINI_API_KEY environment variable is not set. Please create a .env file with your Gemini API key.");
+}
+
+const genAI = new GoogleGenerativeAI(apiKey);
+
+const transcriptSchema = {
+    type: SchemaType.OBJECT,
+    properties: {
+        patientId: {
+            type: SchemaType.STRING,
+            description: 'The unique identifier for the patient.',
+        },
+        consultationDate: {
+            type: SchemaType.STRING,
+            description: 'The date of the consultation in YYYY-MM-DD format.',
+        },
+        transcript: {
+            type: SchemaType.ARRAY,
+            description: 'An array of transcript entries, each containing a speaker, their dialogue, and a timestamp.',
+            items: {
+                type: SchemaType.OBJECT,
+                properties: {
+                    speaker: {
+                        type: SchemaType.STRING,
+                        description: 'The speaker of the line, either "Doctor" or "Patient".',
+                    },
+                    line: {
+                        type: SchemaType.STRING,
+                        description: 'The transcribed dialogue text.',
+                    },
+                    timestamp: {
+                        type: SchemaType.STRING,
+                        description: 'Timestamp of when the line was spoken, in HH:MM:SS format.'
+                    },
+                },
+                required: ['speaker', 'line', 'timestamp'],
+            },
+        },
+    },
+    required: ['patientId', 'consultationDate', 'transcript'],
+};
+
+
+// Maximum file size: 50MB (Gemini API limit is higher, but this is a reasonable limit)
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
+
+export async function generateTranscript(
+    mediaFile: File,
+    patientId: string,
+    consultationDate: string,
+    onProgress: (message: string) => void
+): Promise<TranscriptData> {
+    // Validate file size
+    if (mediaFile.size > MAX_FILE_SIZE) {
+        throw new Error(`Media file is too large (${(mediaFile.size / (1024 * 1024)).toFixed(1)}MB). Maximum size is 50MB.`);
+    }
+
+    onProgress('Preparing media file...');
+    const base64Media = await fileToBase64(mediaFile);
+
+    const mediaPart = {
+        inlineData: {
+            mimeType: mediaFile.type,
+            data: base64Media,
+        },
+    };
+
+    const textPart = {
+        text: `You are an expert medical transcriptionist AI. Your task is to analyze this audio/video of a doctor-patient consultation. Create a complete and accurate transcript.
+    - Identify the two primary speakers and label them as "Doctor" and "Patient".
+    - Include timestamps for each line of dialogue in HH:MM:SS format.
+    - The patient's ID is ${patientId} and the consultation date is ${consultationDate}.
+    - Format the entire output as a single JSON object that adheres to the provided schema. Do not include any other text or markdown formatting outside of the JSON object.`,
+    };
+
+    onProgress('Sending to AI for analysis... This may take several minutes.');
+
+    const model = genAI.getGenerativeModel({
+        model: 'gemini-2.5-pro',
+        generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: transcriptSchema as any,
+        }
+    });
+
+    try {
+        const result = await model.generateContent([textPart.text, mediaPart]);
+
+        onProgress('Processing AI response...');
+
+        const response = await result.response;
+        const jsonText = response.text().trim();
+        const transcriptData: TranscriptData = JSON.parse(jsonText);
+
+        // Basic validation
+        if (!transcriptData.transcript || !Array.isArray(transcriptData.transcript)) {
+            throw new Error('Invalid transcript format received from AI.');
+        }
+
+        return transcriptData;
+    } catch (error) {
+        console.error("Error calling Gemini API:", error);
+        if (error instanceof Error) {
+            throw new Error(`Gemini API Error: ${error.message}`);
+        }
+        throw new Error('An unexpected error occurred while contacting the Gemini API.');
+    }
+}
+
+const MAX_TRANSCRIPT_LENGTH = 100000; // ~100k characters
+
+export async function diarizeTextTranscript(
+    transcriptText: string,
+    patientId: string,
+    consultationDate: string,
+    onProgress: (message: string) => void
+): Promise<TranscriptData> {
+    // Validate transcript length
+    if (transcriptText.length > MAX_TRANSCRIPT_LENGTH) {
+        throw new Error(`Transcript is too long (${transcriptText.length} characters). Maximum length is 100,000 characters.`);
+    }
+
+    if (transcriptText.trim().length < 50) {
+        throw new Error('Transcript is too short. Please provide at least 50 characters of content.');
+    }
+
+    onProgress('Analyzing transcript text...');
+
+    const prompt = `You are an expert medical transcriptionist AI. Your task is to analyze this plain text transcript from a doctor-patient consultation and add proper speaker diarization.
+
+TRANSCRIPT TEXT:
+${transcriptText}
+
+INSTRUCTIONS:
+- Identify speakers in the transcript and label them as "Doctor" and "Patient"
+- If the transcript already has some speaker labels, use them as hints but correct if needed
+- Break the transcript into individual speaker turns
+- Generate or estimate timestamps in HH:MM:SS format for each turn (start at 00:00:00 and increment logically)
+- The patient's ID is ${patientId} and the consultation date is ${consultationDate}
+- Preserve the actual spoken content accurately
+- Format output as JSON matching the provided schema
+
+Return ONLY the JSON object, no other text or markdown.`;
+
+    onProgress('Sending to AI for diarization... This may take a minute.');
+
+    const model = genAI.getGenerativeModel({
+        model: 'gemini-2.5-pro',
+        generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: transcriptSchema as any,
+        }
+    });
+
+    try {
+        const result = await model.generateContent(prompt);
+
+        onProgress('Processing AI response...');
+
+        const response = await result.response;
+        const jsonText = response.text().trim();
+        const transcriptData: TranscriptData = JSON.parse(jsonText);
+
+        // Basic validation
+        if (!transcriptData.transcript || !Array.isArray(transcriptData.transcript)) {
+            throw new Error('Invalid transcript format received from AI.');
+        }
+
+        return transcriptData;
+    } catch (error) {
+        console.error("Error calling Gemini API:", error);
+        if (error instanceof Error) {
+            throw new Error(`Gemini API Error: ${error.message}`);
+        }
+        throw new Error('An unexpected error occurred while contacting the Gemini API.');
+    }
+}
