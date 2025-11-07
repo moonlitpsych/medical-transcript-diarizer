@@ -99,11 +99,11 @@ export default function Page() {
         : (textTranscript.trim() && patientId.trim() && consultationDate);
 
     return (
-        <div className="min-h-screen bg-slate-100/50 font-sans text-slate-800 flex flex-col items-center justify-center p-4">
+        <div className="min-h-screen bg-slate-100/50 font-sans text-slate-800 p-4 py-8">
             <div className="w-full max-w-3xl mx-auto">
-                <header className="text-center mb-8">
-                    <div className="flex items-center justify-center gap-3 text-3xl md:text-4xl font-bold text-slate-700">
-                        <MedicalIcon className="w-10 h-10 text-blue-500" />
+                <header className="text-center mb-6">
+                    <div className="flex items-center justify-center gap-2 text-xl md:text-2xl font-bold text-slate-700">
+                        <MedicalIcon className="w-6 h-6 md:w-8 md:h-8 text-blue-500 flex-shrink-0" />
                         <h1>Medical Transcript Diarizer</h1>
                     </div>
                     <p className="mt-2 text-slate-500">
@@ -227,7 +227,7 @@ export default function Page() {
                     )}
                 </main>
 
-                <footer className="text-center mt-8 text-sm text-slate-400">
+                <footer className="text-center mt-6 text-xs text-slate-400">
                     <p>&copy; {new Date().getFullYear()} MedTranscribe AI. All rights reserved.</p>
                 </footer>
             </div>
